@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Javapocalypse: JNDI Injection with Log4J</title>
+
+	<style>
+		.FirstSlides{
+			width: 1280px;
+			height: 720px;
+		}
+		.Title{
+		  position:absolute;
+		  right:10%;
+		  width:80%;
+		  top:20%;
+		  background-color:rgba(50,48,53,0.5);
+		  text-align: right;
+		}
+	  </style>
+
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/main.js"></script>
+
+    <div class="reveal">
+      <div class="slides">
+                <!-- Photo by <a href="https://unsplash.com/@thematthoward?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText">Matt Howard</a> on <a href="https://unsplash.com/collections/Mu-tCZvtlOo/fire?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText">Unsplash</a> -->
+				<section data-state="header1" data-background="background.jpg">
+					<div class="FirstSlides">
+					  <div class="Title">
+						<h1>javapocalypse:</h1>
+						<h3>JNDI Injection with Log4J</h3>
+						<small>January 4th, 2022</small>
+					  </div>
+					</div>
+					<aside class="notes">
+						<ul>
+						  <li>Cette fin d'annee 2021 a etait bien agite avec la publication d'une vulnerabilite concernant log4j</li>
+						  <li>C'est une vulnerabilite critique avec un score CVSS de 10, sur 10</li>
+						  <li>Cela permet a l'attaquant d'executer, sur le serveur applicatif, le code de son choix (comme un reverse shell).</li>
+						  <li>De quoi semer un vent de panique dans le monde de la sécurité informatique,</li>
+						  <li>Et Pour certaines societes, ce fut l'apocalypse avec de nombreuses attaques</li>
+						  <li>Suite a la publication de la vulnerabilite, il a fallut patcher, a plusieurs reprises</li>
+						  <li>Et cela en pleine periode de fetes!</li>
+						</ul>
+					</aside>
+				</section>
+
+				<section>
+					<h3>TL;DR</h3>
+					<img src="keep_calm.png">
+					<aside class="notes">
+						<ul>
+						  <li>Si vous ne pouvez pas suivre cett presentation jusqu'au bout, voici la seule chose a retenir:</li>
+						  <li>Faites de l'encodage en sortie, meme pour les log!</li>
+						  <li>Si vos logs sont stockes en base de donnees, faire un encodage pour du SQL</li>
+						  <li>Si vos logs sont stockes en JSON, faire un encodage pour du JSON</li>
+						  <li>Si vos logs sont stockes ne sont pas structure (ni json, ni xml, ...), faire un encodage pour du ... HTML</li>
+						  <li>Vous n'aurez meme pas besoin de mettre a jour log4j !!!!!</li>
+						</ul>
+					</aside>
+				</section>
+
+				<section>
+					<h1>Agenda</h1>
+					<ul>
+					  <li>Log4j</li>
+					  <li>Log Injection Attacks</li>
+					  <li>JNDI Injection</li>
+					  <li>Demo: Hack & Fix</li>
+					</ul>
+				</section>
+
+				<section>
+					<section>
+						<h1>log4j</h1>
+					</section>
+					<section>
+						<h1>What is log4j ?</h1>
+						<p class="fragment fade-in-then-out">log4j is a Java Logging Framework</p>
+						<p class="fragment">log4j is an <b>Old</b> Java Logging Framework</p>
+						<p class="fragment">(It has been replaced by logback)</p>
+                        <aside class="notes">
+							<ul>
+								<li>log4j, est un framework de journalisation en Java</li>
+								<li>Pardons, un vieux framework!</li>
+								<li>Il a etait remplace par logback depuis des annees</li>
+								<li>De memoire, j'utilise logback depuis 2013, et vous ?</li>
+								<li>Alors en regardant le repo du logback, la v1.0.0 est sortie le 1 novembre 2011, soit 10 ans avant la CVE!</li>
+								<li>Vous l'aurait compris, nous allons faire un peu d'archeologie, a l'epoque de struts, maven ou encore java 8</li>
+							  </ul>
+						</aside>
+					</section>
+					<section>
+						<h1>Log4j Version</h1>
+						<ul>
+							<li>Log4j 1</li>
+							<li>Log4j 2 (release 2013)</li>
+						</ul>
+				    </section>
+					<section>
+						<h1>log4j Packages</h1>
+						<ul>
+							<li class="fragment highlight-red">Log4j Core</li>
+							<li>Log4j API</li>
+							<li>Log4j SLF4J Binding</li>
+							<li>...</li>
+					    </ul>
+						<aside class="notes">
+							<ul>
+								<li>log4j est decoupe en nombreux packages</li>
+								<li>Seul log4j Core est concerne par la vulnerabilite</li>
+								<li>Log4j2 2.0-beta9 through 2.12.1 and 2.13.0 through 2.15.0</li>
+							</ul>
+						</aside>
+					</section>
+
+					<section>
+						<h1>Log4j Feature</h1>
+						<ul>
+							<li>Property Substitution</li>
+							<li>Lookup Substitution</li>
+						</ul>
+				    </section>
+
+					<section>
+						<h1>Property Substitution</h1>
+						<pre><code data-line-numbers="3-5|16"><script type="text/template"><?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="debug" name="RoutingTest" packages="org.apache.logging.log4j.test">
+<Properties>
+	<Property name="filename">target/rolling1/rollingtest-$${sd:type}.log</Property>
+</Properties>
+<ThresholdFilter level="debug"/>
+
+<Appenders>
+	<Console name="STDOUT">
+	<PatternLayout pattern="%m%n"/>
+	<ThresholdFilter level="debug"/>
+	</Console>
+	<Routing name="Routing">
+	<Routes pattern="$${sd:type}">
+		<Route>
+		<RollingFile name="Rolling-${sd:type}" fileName="${filename}"
+					filePattern="target/rolling1/test1-${sd:type}.%i.log.gz">
+			<PatternLayout>
+			<pattern>%d %p %c{1.} [%t] %m%n</pattern>
+			</PatternLayout>
+			<SizeBasedTriggeringPolicy size="500" />
+		</RollingFile>
+		</Route>
+		<Route ref="STDOUT" key="Audit"/>
+	</Routes>
+	</Routing>
+</Appenders>
+
+<Loggers>
+	<Logger name="EventLogger" level="info" additivity="false">
+	<AppenderRef ref="Routing"/>
+	</Logger>
+
+	<Root level="error">
+	<AppenderRef ref="STDOUT"/>
+	</Root>
+</Loggers>
+
+</Configuration></code></pre>
+						<aside class="notes">
+						  https://logging.apache.org/log4j/2.x/manual/configuration.html#PropertySubstitution
+					    </aside>
+					</section>
+					<section>
+							<h1>Lookup Substitution</h1>
+							<pre><code data-line-numbers="3"><File name="Application" fileName="application.log">
+	<PatternLayout>
+		<pattern>%d %p %c{1.} [%t] $${env:USER} %m%n</pattern>
+	</PatternLayout>
+</File>
+</script></code></pre>
+							<aside class="notes">
+								<ul>
+									<li>Un exemple avec les var d'env, ici USER mais cela pourrait etre un secret</li>
+									<li>Et il y en a bien d'autre</li>
+								</ul>
+							</aside>
+					</section>
+
+					<section>
+						<h1>Lookup Prefix</h1>
+						<p>base64, ctx, date, env, <span class="fragment highlight-red">jndi</span>, jvmrunargs, log4j, map, sysh, ...</p>
+						<aside class="notes">
+							<ul>
+								<li>on peut remarquer des prefixes utile: date, env</li>
+								<li>on a egalement CTX (Thread Context Map) qui sera utilise par une autre CVE pour faire un deni de service</li>
+								<li>il y a des extensions: docker ou encore kubernetes</li>
+							</ul>
+							https://logging.apache.org/log4j/2.x/manual/lookups.html
+						</aside>
+					</section>
+
+					<section>
+						<h1>JNDI Lookup</h1>
+						<p>JNDI (Java Naming and Directory Interface)<br>
+							 is an API to get ressource using naming convention:</p>
+						<ul>
+							<li>LDAP</li>
+							<li>DNS</li>
+							<li>RMI</li>
+							<li>...</li>
+						</ul>
+						<br>
+						<p><small>Only LDAP and DNS are enable by default!</small></p>
+						<aside class="notes">
+							<ul>
+								<li>Le JNDI est une API pour obtenir des ressoures (du texte, des donnees, du binaire, des class java, ...)</li>
+								<li>Le JNDI lookup est particulierement interessant !</li>
+								<li>Mais seul le LDAP et le DNS est dispo par defaut, donc va falloir ruser</li>
+							</ul>
+
+						</aside>
+					</section>
+
+				</section>
+
+				<section>
+					<section>
+						<h1>Log Injection Attack</h1>
+						<aside class="notes">
+							Nous avons vu que log4j nous offre bcp de possiibilite...
+							alors passons a l'attaque !!!!
+						</aside>
+				    </section>
+
+					<section>
+						<h1>Log Injection Attack</h1>
+						<ul>
+							<li>Log forging</li>
+							<li>Code Execution</li>
+						</ul>
+				    </section>
+
+					<section>
+						<h1>Demo</h1>
+						<p>Log forging with CRLF Injection</p>
+						<aside class="notes">
+							https://github.com/0xdbe-appsec/log-injection-spring-boot-logback
+						</aside>
+					</section>
+				</section>
+
+				<section>
+					<section>
+						<h1>JNDI Injection</h1>
+					</section>
+					<section data-background-color="white">
+						<img height="600px" src="JNDI_Injection_with_Log4J.jpg" />
+					</section>
+				</section>
+
+				<section>
+					<h1>Bilan</h1>
+					<ul>
+						<li>Old App with many vulnerabilities</li>
+						<li>No output encoding: OOPS!</li>
+					</ul>
+					<aside class="notes">
+						<ul>
+							<li>bcp de bruit pour pas grand chose</li>
+							<li>du vieux soft deja troue</li>
+							<li>les base du secure coding non maitrise</li>
+							<li>En gros, tu l'as bien cherche</li>
+					   </ul>
+					</aside>
+				</section>
+
+				<section>
+					<iframe width="1120" height="630" src="https://www.youtube.com/embed/E3418SeWZfQ" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+				</section>
+      </div>
+    </div>
+  </body>
+</html>
